@@ -1,5 +1,5 @@
 # app.py - Solstice Events Kiosk Service (Async + Webhooks)
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, render_template_string, Response, stream_with_context
 import datetime
 import json
 import uuid
@@ -221,6 +221,36 @@ def get_queue_status():
         "pending_jobs": print_queue,
         "completed_jobs": completed_jobs[-10:]  # Last 10 completed jobs
     })
+
+
+# ---------- SERVER-SENT EVENTS (REAL-TIME UPDATES) ----------
+@app.route('/api/stream')
+def event_stream():
+    """Server-Sent Events endpoint for real-time updates."""
+    def generate():
+        last_checked_in_count = 0
+        last_queue_length = 0
+        while True:
+            time.sleep(1)
+            
+            # Check if anything changed
+            current_checked_in = sum(1 for a in attendees.values() if a['checked_in'])
+            current_queue_length = len(print_queue)
+            
+            if current_checked_in != last_checked_in_count or current_queue_length != last_queue_length:
+                last_checked_in_count = current_checked_in
+                last_queue_length = current_queue_length
+                yield f"data: {json.dumps({'action': 'refresh'})}\n\n"
+    
+    return Response(generate(), mimetype="text/event-stream")
+
+
+# ---------- START THE QUEUE WORKER ----------
+def start_queue_worker():
+    """Start the background queue processing thread"""
+    worker_thread = threading.Thread(target=process_print_queue, daemon=True)
+    worker_thread.start()
+    print("🚀 Queue worker started!")
 
 
 # ---------- START THE QUEUE WORKER ----------
@@ -677,14 +707,35 @@ HTML_TEMPLATE = """
         }
     });
 
-    // ---------- AUTO-REFRESH ----------
-    // Refresh attendees and queue status every 3 seconds
+       // ---------- REAL-TIME UPDATES WITH SSE ----------
+    // Use Server-Sent Events for instant updates instead of polling
     loadAttendees();
     loadQueueStatus();
-    setInterval(() => {
-        loadAttendees();
-        loadQueueStatus();
-    }, 3000);
+
+    // Check if browser supports EventSource
+    if (typeof(EventSource) !== 'undefined') {
+        const eventSource = new EventSource('/api/stream');
+        eventSource.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.action === 'refresh') {
+                console.log('📡 Real-time update received!');
+                loadAttendees();
+                loadQueueStatus();
+            }
+        };
+
+        eventSource.onerror = function() {
+            console.log('🔄 SSE connection lost. Reconnecting...');
+            // Browser automatically reconnects after a delay
+        };
+    } else {
+        // Fallback for older browsers: poll every 5 seconds
+        console.log('⚠️ EventSource not supported. Using polling fallback.');
+        setInterval(() => {
+            loadAttendees();
+            loadQueueStatus();
+        }, 5000);
+    }
 
     // Also auto-refresh when a scan happens (already called in scanAttendee)
 </script>
@@ -701,3 +752,5 @@ if __name__ == '__main__':
     
     # Run the Flask app
     app.run(host='0.0.0.0', port=5001, debug=True)
+
+    
