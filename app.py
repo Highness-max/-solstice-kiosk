@@ -230,17 +230,30 @@ def event_stream():
     def generate():
         last_checked_in_count = 0
         last_queue_length = 0
+        
         while True:
-            time.sleep(1)
-            
-            # Check if anything changed
-            current_checked_in = sum(1 for a in attendees.values() if a['checked_in'])
-            current_queue_length = len(print_queue)
-            
-            if current_checked_in != last_checked_in_count or current_queue_length != last_queue_length:
-                last_checked_in_count = current_checked_in
-                last_queue_length = current_queue_length
-                yield f"data: {json.dumps({'action': 'refresh'})}\n\n"
+            try:
+                # Check for updates every second
+                time.sleep(1)
+                
+                # Get current state
+                current_checked_in = sum(1 for a in attendees.values() if a['checked_in'])
+                current_queue_length = len(print_queue)
+                
+                # If anything changed, send an update
+                if current_checked_in != last_checked_in_count or current_queue_length != last_queue_length:
+                    last_checked_in_count = current_checked_in
+                    last_queue_length = current_queue_length
+                    yield f"data: {json.dumps({'action': 'refresh'})}\n\n"
+                    
+            except GeneratorExit:
+                # This happens when the client closes the connection
+                print("🔴 SSE client disconnected")
+                break
+            except Exception as e:
+                # Catch any other errors to prevent worker crash
+                print(f"⚠️ SSE error: {e}")
+                break
     
     return Response(generate(), mimetype="text/event-stream")
 
@@ -754,5 +767,3 @@ if __name__ == '__main__':
     # Run the Flask app — Render provides the PORT dynamically
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-    
