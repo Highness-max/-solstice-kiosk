@@ -31,6 +31,7 @@ completed_jobs = []
 
 # Duplicate scan protection
 scanned_tickets = set()
+queue_worker_started = False
 
 
 # ---------- SIMULATED MESSAGE QUEUE ----------
@@ -110,8 +111,8 @@ def scan_ticket():
     Scan QR code (simulated).
     Instead of calling the printer sync, we publish to a queue.
     """
-    data = request.get_json()
-    attendee_id = data.get('attendee_id', '').strip()
+    data = request.get_json(silent=True) or {}
+    attendee_id = str(data.get('attendee_id', '')).strip()
     
     # Validate input
     if not attendee_id:
@@ -171,7 +172,7 @@ def print_complete_webhook():
     Webhook endpoint for the vendor to call back when print is complete.
     This is the key pivot: we receive a callback instead of waiting synchronously.
     """
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     print(f"📩 Webhook received: {data}")
     
     attendee_id = data.get('attendee_id')
@@ -191,14 +192,17 @@ def print_complete_webhook():
     if status == 'success':
         attendee['checked_in'] = True
         attendee['pending'] = False
+        attendee['print_failed'] = False
         attendee['checked_in_at'] = data.get('timestamp', str(datetime.datetime.now()))
         attendee['ticket_id'] = ticket_id
+        scanned_tickets.discard(attendee_id)
         
         print(f"✅ {attendee['name']} (ID: {attendee_id}) checked in successfully!")
     else:
         # If print failed, we need to handle it gracefully
         attendee['pending'] = False
         attendee['print_failed'] = True
+        scanned_tickets.discard(attendee_id)
         print(f"❌ Print failed for {attendee['name']} (ID: {attendee_id})")
     
     return jsonify({"status": "success", "message": "Webhook processed"}), 200
@@ -268,10 +272,18 @@ def event_stream():
 
 # ---------- START THE QUEUE WORKER ----------
 def start_queue_worker():
-    """Start the background queue processing thread"""
+    """Start the background queue processing thread once."""
+    global queue_worker_started
+    if queue_worker_started:
+        return
     worker_thread = threading.Thread(target=process_print_queue, daemon=True)
     worker_thread.start()
+    queue_worker_started = True
     print("🚀 Queue worker started!")
+
+
+# Start the queue worker as soon as the app module is imported by Gunicorn or Flask.
+start_queue_worker()
 
 
 # ---------- HTML TEMPLATE (Kiosk UI) ----------
