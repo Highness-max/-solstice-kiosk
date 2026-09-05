@@ -1,0 +1,18 @@
+DRY RUN #1
+Date: [Date]
+Time: [Duration]
+
+Slide 1 (Title): 0:30
+Slide 2 (Problem): 1:00
+Slide 3 (Solution): 1:00
+Slide 4 (Architecture): 1:30
+Slide 5 (Data Model): 0:45
+Slide 6 (Status Flow): 1:00
+Slide 7 (Personas): 1:00
+Slide 8 (Trade-offs): 1:00
+Slide 9 (Edge Cases): 1:15
+Slide 10 (Roadmap): 0:45
+TOTAL: 9:45
+
+Unclear Slides: Slide 4 (Architecture), Slide 8 (Trade-offs)
+Transitions: Smooth between slides 3-4, rough between 7-8
