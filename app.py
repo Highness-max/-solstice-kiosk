@@ -745,12 +745,14 @@ HTML_TEMPLATE = """
 """
 
 
-# ---------- START THE APP ----------
 if __name__ == '__main__':
+    import os
+    
     # Start the queue worker thread
     start_queue_worker()
     
-    # Run the Flask app
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    # Run the Flask app — Render provides the PORT dynamically
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
     
