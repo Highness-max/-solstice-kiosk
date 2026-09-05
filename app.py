@@ -40,26 +40,34 @@ def process_print_queue():
     Simulates a worker that processes the message queue.
     In production, this would be a separate service (Celery, Redis, etc.)
     """
+    print("🔄 Queue worker thread started and is now running!")
     while True:
-        if print_queue:
-            job = print_queue.pop(0)
-            print(f"🖨️ Processing print job: {job['ticket_id']} for {job['attendee_name']}")
+        try:
+            if print_queue:
+                print(f"📊 Queue has {len(print_queue)} job(s). Processing next job...")
+                job = print_queue.pop(0)
+                print(f"🖨️ Processing print job: {job['ticket_id']} for {job['attendee_name']}")
 
-            # Simulate print time (3 seconds)
-            time.sleep(3)
+                # Simulate print time (3 seconds)
+                time.sleep(3)
 
-            # Complete the job
-            completed_jobs.append({
-                "ticket_id": job["ticket_id"],
-                "attendee_id": job["attendee_id"],
-                "status": "completed",
-                "timestamp": str(datetime.datetime.now())
-            })
+                # Complete the job
+                completed_jobs.append({
+                    "ticket_id": job["ticket_id"],
+                    "attendee_id": job["attendee_id"],
+                    "status": "completed",
+                    "timestamp": str(datetime.datetime.now())
+                })
 
-            # Send webhook callback (simulate vendor calling back)
-            send_webhook_callback(job["attendee_id"], job["ticket_id"])
-        else:
-            time.sleep(1)
+                print(f"✅ Job completed for {job['attendee_name']}. Sending webhook callback...")
+                send_webhook_callback(job["attendee_id"], job["ticket_id"])
+                print(f"📡 Webhook callback sent for {job['attendee_id']}")
+            else:
+                # Queue is empty, wait
+                time.sleep(1)
+        except Exception as e:
+            print(f"❌ Queue worker error: {e}")
+            time.sleep(5)  # Wait before retrying
 
 
 def send_webhook_callback(attendee_id, ticket_id):
@@ -68,25 +76,22 @@ def send_webhook_callback(attendee_id, ticket_id):
     Instead of making an HTTP request, we call the webhook logic directly.
     This bypasses Render's networking restrictions on background threads.
     """
+    print(f"📡 Starting webhook callback for {attendee_id}...")
+    
     # Simulate network delay (2 seconds)
     time.sleep(2)
 
-    # Call the webhook logic directly (bypass HTTP)
-    # This is the same code that runs when /webhook/print-complete is called
     with app.app_context():
         try:
-            # Update the attendee status directly
             attendee = attendees.get(attendee_id)
             if not attendee:
                 print(f"❌ Attendee {attendee_id} not found")
                 return
 
-            # Check if already checked in
             if attendee['checked_in']:
                 print(f"ℹ️ {attendee['name']} already checked in, ignoring duplicate webhook")
                 return
 
-            # Mark as checked in
             attendee['checked_in'] = True
             attendee['pending'] = False
             attendee['print_failed'] = False
