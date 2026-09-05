@@ -266,13 +266,6 @@ def start_queue_worker():
     print("🚀 Queue worker started!")
 
 
-# ---------- START THE QUEUE WORKER ----------
-def start_queue_worker():
-    """Start the background queue processing thread"""
-    worker_thread = threading.Thread(target=process_print_queue, daemon=True)
-    worker_thread.start()
-    print("🚀 Queue worker started!")
-
 
 # ---------- HTML TEMPLATE (Kiosk UI) ----------
 HTML_TEMPLATE = """
