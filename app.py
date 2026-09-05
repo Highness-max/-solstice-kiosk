@@ -5,6 +5,8 @@ import json
 import uuid
 import time
 import threading
+import requests
+import os
 from collections import defaultdict
 
 app = Flask(__name__)
@@ -30,9 +32,6 @@ completed_jobs = []
 # Duplicate scan protection
 scanned_tickets = set()
 
-# Webhook endpoint for the vendor to call back
-VENDOR_WEBHOOK_URL = "http://127.0.0.1:5001/webhook/print-complete"
-
 
 # ---------- SIMULATED MESSAGE QUEUE ----------
 def process_print_queue():
@@ -45,7 +44,7 @@ def process_print_queue():
             job = print_queue.pop(0)
             print(f"🖨️ Processing print job: {job['ticket_id']} for {job['attendee_name']}")
             
-            # Simulate print time (2-5 seconds)
+            # Simulate print time (3 seconds)
             time.sleep(3)
             
             # Complete the job
@@ -65,21 +64,30 @@ def process_print_queue():
 def send_webhook_callback(attendee_id, ticket_id):
     """
     Simulates the vendor calling our webhook endpoint.
-    In production, the vendor would call our exposed webhook URL.
+    Uses the external Render URL (or localhost for development).
     """
-    # Simulate network delay (1-3 seconds)
+    # Get the base URL from environment variable (set on Render)
+    # Default to localhost for local development
+    base_url = os.environ.get('RENDER_URL', 'http://127.0.0.1:5001')
+    webhook_url = f"{base_url}/webhook/print-complete"
+    
+    # Simulate network delay (2 seconds)
     time.sleep(2)
     
-    # Call our own webhook endpoint (simulating vendor callback)
-    with app.test_client() as client:
-        response = client.post('/webhook/print-complete', 
-                               json={
-                                   "attendee_id": attendee_id,
-                                   "ticket_id": ticket_id,
-                                   "status": "success",
-                                   "timestamp": str(datetime.datetime.now())
-                               })
+    try:
+        response = requests.post(
+            webhook_url,
+            json={
+                "attendee_id": attendee_id,
+                "ticket_id": ticket_id,
+                "status": "success",
+                "timestamp": str(datetime.datetime.now())
+            },
+            timeout=10
+        )
         print(f"📡 Webhook callback sent for {attendee_id}: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Webhook callback failed: {e}")
 
 
 # ---------- FLASK ROUTES ----------
@@ -264,7 +272,6 @@ def start_queue_worker():
     worker_thread = threading.Thread(target=process_print_queue, daemon=True)
     worker_thread.start()
     print("🚀 Queue worker started!")
-
 
 
 # ---------- HTML TEMPLATE (Kiosk UI) ----------
@@ -713,7 +720,7 @@ HTML_TEMPLATE = """
         }
     });
 
-       // ---------- REAL-TIME UPDATES WITH SSE ----------
+    // ---------- REAL-TIME UPDATES WITH SSE ----------
     // Use Server-Sent Events for instant updates instead of polling
     loadAttendees();
     loadQueueStatus();
@@ -751,9 +758,8 @@ HTML_TEMPLATE = """
 """
 
 
+# ---------- START THE APP ----------
 if __name__ == '__main__':
-    import os
-    
     # Start the queue worker thread
     start_queue_worker()
     
