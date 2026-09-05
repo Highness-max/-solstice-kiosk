@@ -65,30 +65,39 @@ def process_print_queue():
 def send_webhook_callback(attendee_id, ticket_id):
     """
     Simulates the vendor calling our webhook endpoint.
-    Uses internal localhost (works on Render because we use the PORT env var).
+    Instead of making an HTTP request, we call the webhook logic directly.
+    This bypasses Render's networking restrictions on background threads.
     """
-    # Get the internal port from Render's environment (or default to 5000 for local)
-    port = os.environ.get('PORT', 5000)
-    base_url = f"http://localhost:{port}"
-    webhook_url = f"{base_url}/webhook/print-complete"
-
     # Simulate network delay (2 seconds)
     time.sleep(2)
 
-    try:
-        response = requests.post(
-            webhook_url,
-            json={
-                "attendee_id": attendee_id,
-                "ticket_id": ticket_id,
-                "status": "success",
-                "timestamp": str(datetime.datetime.now())
-            },
-            timeout=10
-        )
-        print(f"📡 Webhook callback sent for {attendee_id}: {response.status_code}")
-    except Exception as e:
-        print(f"❌ Webhook callback failed: {e}")
+    # Call the webhook logic directly (bypass HTTP)
+    # This is the same code that runs when /webhook/print-complete is called
+    with app.app_context():
+        try:
+            # Update the attendee status directly
+            attendee = attendees.get(attendee_id)
+            if not attendee:
+                print(f"❌ Attendee {attendee_id} not found")
+                return
+
+            # Check if already checked in
+            if attendee['checked_in']:
+                print(f"ℹ️ {attendee['name']} already checked in, ignoring duplicate webhook")
+                return
+
+            # Mark as checked in
+            attendee['checked_in'] = True
+            attendee['pending'] = False
+            attendee['print_failed'] = False
+            attendee['checked_in_at'] = str(datetime.datetime.now())
+            attendee['ticket_id'] = ticket_id
+            scanned_tickets.discard(attendee_id)
+
+            print(f"✅ {attendee['name']} (ID: {attendee_id}) checked in successfully!")
+
+        except Exception as e:
+            print(f"❌ Direct webhook processing failed: {e}")
 
 
 # ---------- FLASK ROUTES ----------
