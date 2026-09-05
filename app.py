@@ -44,10 +44,10 @@ def process_print_queue():
         if print_queue:
             job = print_queue.pop(0)
             print(f"🖨️ Processing print job: {job['ticket_id']} for {job['attendee_name']}")
-            
+
             # Simulate print time (3 seconds)
             time.sleep(3)
-            
+
             # Complete the job
             completed_jobs.append({
                 "ticket_id": job["ticket_id"],
@@ -55,7 +55,7 @@ def process_print_queue():
                 "status": "completed",
                 "timestamp": str(datetime.datetime.now())
             })
-            
+
             # Send webhook callback (simulate vendor calling back)
             send_webhook_callback(job["attendee_id"], job["ticket_id"])
         else:
@@ -65,16 +65,16 @@ def process_print_queue():
 def send_webhook_callback(attendee_id, ticket_id):
     """
     Simulates the vendor calling our webhook endpoint.
-    Uses the external Render URL (or localhost for development).
+    Uses internal localhost (works on Render because we use the PORT env var).
     """
-    # Get the base URL from environment variable (set on Render)
-    # Default to localhost for local development
-    base_url = os.environ.get('RENDER_URL', 'http://127.0.0.1:5001')
+    # Get the internal port from Render's environment (or default to 5000 for local)
+    port = os.environ.get('PORT', 5000)
+    base_url = f"http://localhost:{port}"
     webhook_url = f"{base_url}/webhook/print-complete"
-    
+
     # Simulate network delay (2 seconds)
     time.sleep(2)
-    
+
     try:
         response = requests.post(
             webhook_url,
@@ -113,17 +113,17 @@ def scan_ticket():
     """
     data = request.get_json(silent=True) or {}
     attendee_id = str(data.get('attendee_id', '')).strip()
-    
+
     # Validate input
     if not attendee_id:
         return jsonify({"error": "No attendee ID provided"}), 400
-    
+
     # Check if attendee exists
     if attendee_id not in attendees:
         return jsonify({"error": "Attendee not found"}), 404
-    
+
     attendee = attendees[attendee_id]
-    
+
     # DUPLICATE SCAN PROTECTION (even with async callbacks)
     if attendee_id in scanned_tickets:
         return jsonify({
@@ -132,7 +132,7 @@ def scan_ticket():
             "attendee_id": attendee_id,
             "status": "duplicate"
         }), 409
-    
+
     # Check if already checked in (from a previous callback)
     if attendee['checked_in']:
         return jsonify({
@@ -141,14 +141,14 @@ def scan_ticket():
             "attendee_id": attendee_id,
             "status": "already_checked_in"
         }), 409
-    
+
     # Mark as pending (waiting for print confirmation)
     attendees[attendee_id]['pending'] = True
     scanned_tickets.add(attendee_id)
-    
+
     # Generate a unique ticket ID for this print job
     ticket_id = f"TICKET-{uuid.uuid4().hex[:8].upper()}"
-    
+
     # PUBLISH TO MESSAGE QUEUE (instead of sync API call)
     print_queue.append({
         "ticket_id": ticket_id,
@@ -156,7 +156,7 @@ def scan_ticket():
         "attendee_name": attendee['name'],
         "timestamp": str(datetime.datetime.now())
     })
-    
+
     return jsonify({
         "status": "pending",
         "message": f"Print request submitted for {attendee['name']}. Waiting for confirmation...",
@@ -174,20 +174,20 @@ def print_complete_webhook():
     """
     data = request.get_json(silent=True) or {}
     print(f"📩 Webhook received: {data}")
-    
+
     attendee_id = data.get('attendee_id')
     ticket_id = data.get('ticket_id')
     status = data.get('status', 'success')
-    
+
     if not attendee_id or attendee_id not in attendees:
         return jsonify({"error": "Invalid attendee ID"}), 400
-    
+
     attendee = attendees[attendee_id]
-    
+
     # Check if attendee is already checked in (prevents double processing)
     if attendee['checked_in']:
         return jsonify({"message": "Already checked in, ignoring duplicate webhook"}), 200
-    
+
     # Update the attendee status
     if status == 'success':
         attendee['checked_in'] = True
@@ -196,7 +196,7 @@ def print_complete_webhook():
         attendee['checked_in_at'] = data.get('timestamp', str(datetime.datetime.now()))
         attendee['ticket_id'] = ticket_id
         scanned_tickets.discard(attendee_id)
-        
+
         print(f"✅ {attendee['name']} (ID: {attendee_id}) checked in successfully!")
     else:
         # If print failed, we need to handle it gracefully
@@ -204,7 +204,7 @@ def print_complete_webhook():
         attendee['print_failed'] = True
         scanned_tickets.discard(attendee_id)
         print(f"❌ Print failed for {attendee['name']} (ID: {attendee_id})")
-    
+
     return jsonify({"status": "success", "message": "Webhook processed"}), 200
 
 
@@ -213,7 +213,7 @@ def get_attendee_status(attendee_id):
     """Get status of a specific attendee (for UI polling)"""
     if attendee_id not in attendees:
         return jsonify({"error": "Attendee not found"}), 404
-    
+
     attendee = attendees[attendee_id]
     return jsonify({
         "attendee_id": attendee_id,
@@ -242,22 +242,22 @@ def event_stream():
     def generate():
         last_checked_in_count = 0
         last_queue_length = 0
-        
+
         while True:
             try:
                 # Check for updates every second
                 time.sleep(1)
-                
+
                 # Get current state
                 current_checked_in = sum(1 for a in attendees.values() if a['checked_in'])
                 current_queue_length = len(print_queue)
-                
+
                 # If anything changed, send an update
                 if current_checked_in != last_checked_in_count or current_queue_length != last_queue_length:
                     last_checked_in_count = current_checked_in
                     last_queue_length = current_queue_length
                     yield f"data: {json.dumps({'action': 'refresh'})}\n\n"
-                    
+
             except GeneratorExit:
                 # This happens when the client closes the connection
                 print("🔴 SSE client disconnected")
@@ -266,7 +266,7 @@ def event_stream():
                 # Catch any other errors to prevent worker crash
                 print(f"⚠️ SSE error: {e}")
                 break
-    
+
     return Response(generate(), mimetype="text/event-stream")
 
 
@@ -774,7 +774,7 @@ HTML_TEMPLATE = """
 if __name__ == '__main__':
     # Start the queue worker thread
     start_queue_worker()
-    
+
     # Run the Flask app — Render provides the PORT dynamically
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
