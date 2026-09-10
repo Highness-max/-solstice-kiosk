@@ -75,7 +75,7 @@ def process_assignment_queue():
     Background worker that processes queued jobs:
     - Rider assignments
     - Status updates (Picked Up, Delivered)
-    
+
     Simulates the async pattern: publish to queue → worker processes → webhook callback
     """
     print("🔄 Reflex queue worker thread started and is now running!")
@@ -513,7 +513,6 @@ HTML_TEMPLATE = """
             margin-top: 10px;
         }
 
-        /* TABS */
         .tabs {
             display: flex;
             gap: 8px;
@@ -547,7 +546,6 @@ HTML_TEMPLATE = """
         }
         .tab.active i { color: #d4af37; }
 
-        /* PANELS */
         .panel { display: none; }
         .panel.active { display: block; }
 
@@ -569,7 +567,6 @@ HTML_TEMPLATE = """
         }
         .card h2 i { color: #d4af37; }
 
-        /* FORM */
         .form-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -626,7 +623,6 @@ HTML_TEMPLATE = """
             border-radius: 20px;
         }
 
-        /* DELIVERY LIST */
         .delivery-item {
             background: #f8fafd;
             border-radius: 14px;
@@ -963,8 +959,16 @@ HTML_TEMPLATE = """
                 body: JSON.stringify({ delivery_id: deliveryId, rider_id: riderId })
             });
             const data = await res.json();
-            if (!res.ok) alert(data.error || data.message);
+            if (!res.ok) {
+                alert(data.error || data.message);
+                return;
+            }
+            // Refresh immediately (shows the queued state)
             loadAll();
+            // Force refresh after the worker completes (5-8 seconds)
+            setTimeout(loadAll, 3000);
+            setTimeout(loadAll, 5000);
+            setTimeout(loadAll, 8000);
         } catch (e) { alert('Network error: ' + e.message); }
     }
 
@@ -979,8 +983,16 @@ HTML_TEMPLATE = """
                 body: JSON.stringify({ delivery_id: deliveryId, new_status: newStatus, rider_id: riderId })
             });
             const data = await res.json();
-            if (!res.ok) alert(data.error || data.message);
+            if (!res.ok) {
+                alert(data.error || data.message);
+                return;
+            }
+            // Refresh immediately (shows the queued state)
             loadAll();
+            // Force refresh after the worker completes (5-8 seconds)
+            setTimeout(loadAll, 3000);
+            setTimeout(loadAll, 5000);
+            setTimeout(loadAll, 8000);
         } catch (e) { alert('Network error: ' + e.message); }
     }
 
@@ -1163,9 +1175,10 @@ HTML_TEMPLATE = """
         `).join('');
     }
 
-    // ---------- INITIAL LOAD + SSE ----------
+    // ---------- INITIAL LOAD + SSE + POLLING FALLBACK ----------
     loadAll();
 
+    // Primary: SSE for instant updates
     if (typeof(EventSource) !== 'undefined') {
         const es = new EventSource('/api/stream');
         es.onmessage = function(event) {
@@ -1176,9 +1189,10 @@ HTML_TEMPLATE = """
             }
         };
         es.onerror = function() { console.log('🔄 SSE reconnecting...'); };
-    } else {
-        setInterval(loadAll, 5000);
     }
+
+    // Fallback: Always poll every 3 seconds to guarantee UI stays fresh
+    setInterval(loadAll, 3000);
 </script>
 
 </body>
