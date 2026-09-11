@@ -11,9 +11,7 @@ app = Flask(__name__)
 
 # ---------- IN-MEMORY "DATABASE" ----------
 # In production, this would be PostgreSQL/SQLite.
-# For this prototype, we use Python dictionaries.
 
-# Delivery requests
 deliveries = {
     "DEL-001": {
         "id": "DEL-001",
@@ -49,7 +47,6 @@ deliveries = {
     }
 }
 
-# Riders (delivery personnel)
 riders = {
     "RDR-001": {"id": "RDR-001", "name": "John Mwangi", "phone": "+254-700-000-101", "active_deliveries": 0},
     "RDR-002": {"id": "RDR-002", "name": "Mary Njeri", "phone": "+254-700-000-102", "active_deliveries": 0},
@@ -60,36 +57,32 @@ riders = {
 assignment_queue = []
 completed_jobs = []
 assigned_deliveries = set()
-queue_worker_started = False
 
 
-# ---------- WORKER: PROCESSES THE QUEUE ----------
-def process_assignment_queue():
-    """Background worker that processes queued jobs."""
-    print("🔄 Reflex queue worker thread started and is now running!")
-    while True:
-        try:
-            if assignment_queue:
-                job = assignment_queue.pop(0)
-                print(f"📊 Queue has {len(assignment_queue)} remaining. Processing job: {job['type']}")
+# ---------- WORKER: PROCESSES A SINGLE JOB IN A FRESH THREAD ----------
+def process_single_job(job):
+    """
+    Processes ONE job in a fresh daemon thread.
+    Spawned per-request from the API handlers so it survives Gunicorn's
+    process forking (which kills threads started at import time).
+    """
+    print(f"🧵 Fresh worker thread started for job {job['job_id']} ({job['type']})")
+    try:
+        # Simulate processing time (e.g., sending push notification to rider)
+        time.sleep(3)
 
-                time.sleep(3)
+        completed_jobs.append({
+            "job_id": job["job_id"],
+            "type": job["type"],
+            "delivery_id": job["delivery_id"],
+            "status": "completed",
+            "timestamp": str(datetime.datetime.now())
+        })
 
-                completed_jobs.append({
-                    "job_id": job["job_id"],
-                    "type": job["type"],
-                    "delivery_id": job["delivery_id"],
-                    "status": "completed",
-                    "timestamp": str(datetime.datetime.now())
-                })
-
-                print(f"✅ Job {job['job_id']} processed. Calling webhook...")
-                process_webhook_callback(job)
-            else:
-                time.sleep(1)
-        except Exception as e:
-            print(f"❌ Queue worker error: {e}")
-            time.sleep(5)
+        print(f"✅ Job {job['job_id']} processed. Triggering webhook...")
+        process_webhook_callback(job)
+    except Exception as e:
+        print(f"❌ process_single_job error: {e}")
 
 
 def process_webhook_callback(job):
@@ -235,13 +228,18 @@ def assign_rider():
     assigned_deliveries.add(delivery_id)
 
     job_id = f"JOB-{uuid.uuid4().hex[:8].upper()}"
-    assignment_queue.append({
+    job = {
         "job_id": job_id,
         "type": "assign_rider",
         "delivery_id": delivery_id,
         "rider_id": rider_id,
         "published_at": str(datetime.datetime.now())
-    })
+    }
+    assignment_queue.append(job)
+
+    # 🚀 SPAWN A FRESH WORKER THREAD FOR THIS JOB
+    # (survives Gunicorn's process forking — works on Render)
+    threading.Thread(target=process_single_job, args=(job,), daemon=True).start()
 
     return jsonify({
         "status": "pending",
@@ -302,6 +300,9 @@ def rider_update_status():
         job["proof"] = data.get("proof", "Signed by customer")
 
     assignment_queue.append(job)
+
+    # 🚀 SPAWN A FRESH WORKER THREAD FOR THIS JOB
+    threading.Thread(target=process_single_job, args=(job,), daemon=True).start()
 
     return jsonify({
         "status": "pending",
@@ -407,20 +408,6 @@ def event_stream():
                 break
 
     return Response(generate(), mimetype="text/event-stream")
-
-
-# ---------- START WORKER ON IMPORT ----------
-def start_queue_worker():
-    global queue_worker_started
-    if queue_worker_started:
-        return
-    worker_thread = threading.Thread(target=process_assignment_queue, daemon=True)
-    worker_thread.start()
-    queue_worker_started = True
-    print("🚀 Reflex queue worker started!")
-
-
-start_queue_worker()
 
 
 # ---------- HTML TEMPLATE (Reflex UI with 3 Tabs) ----------
@@ -802,8 +789,6 @@ HTML_TEMPLATE = """
 
 <script>
     let currentTab = 'retailer';
-
-    // ---------- GLOBAL FLAG TO PAUSE POLLING DURING USER INTERACTION ----------
     let pollingPaused = false;
 
     function switchTab(tabName, btn) {
@@ -1005,11 +990,10 @@ HTML_TEMPLATE = """
         `).join('');
     }
 
-    // ---------- DISPATCHER: PRESERVES DROPDOWN SELECTION ----------
     function renderDispatcherDeliveries(deliveries, riders) {
         const container = document.getElementById('dispatcherDeliveries');
 
-        // ---- SAVE CURRENT DROPDOWN SELECTIONS ----
+        // Save current dropdown selections
         const savedSelections = {};
         document.querySelectorAll('[id^="rider-DEL-"]').forEach(el => {
             if (el.value) savedSelections[el.id] = el.value;
@@ -1054,7 +1038,7 @@ HTML_TEMPLATE = """
             `;
         }).join('');
 
-        // ---- RESTORE DROPDOWN SELECTIONS ----
+        // Restore dropdown selections
         Object.entries(savedSelections).forEach(([id, value]) => {
             const el = document.getElementById(id);
             if (el) el.value = value;
@@ -1141,7 +1125,7 @@ HTML_TEMPLATE = """
         `).join('');
     }
 
-    // ---------- PAUSE POLLING WHILE USER INTERACTS WITH A DROPDOWN ----------
+    // Pause polling while user interacts with dropdowns
     document.addEventListener('focusin', (e) => {
         if (e.target.tagName === 'SELECT') pollingPaused = true;
     });
@@ -1151,7 +1135,7 @@ HTML_TEMPLATE = """
         }
     });
 
-    // ---------- INITIAL LOAD + SSE + POLLING FALLBACK ----------
+    // Initial load + SSE + polling fallback
     loadAll();
 
     if (typeof(EventSource) !== 'undefined') {
@@ -1166,7 +1150,6 @@ HTML_TEMPLATE = """
         es.onerror = function() { console.log('🔄 SSE reconnecting...'); };
     }
 
-    // Poll only when the user is NOT interacting with a dropdown
     setInterval(() => {
         if (!pollingPaused) loadAll();
     }, 3000);
@@ -1179,6 +1162,5 @@ HTML_TEMPLATE = """
 
 # ---------- START THE APP ----------
 if __name__ == '__main__':
-    start_queue_worker()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
