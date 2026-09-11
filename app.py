@@ -57,27 +57,15 @@ riders = {
 }
 
 # ---------- MESSAGE QUEUE ----------
-# Jobs published here are processed asynchronously by the worker thread
 assignment_queue = []
-
-# Completed jobs (audit trail)
 completed_jobs = []
-
-# Duplicate assignment protection (prevents assigning a delivery twice)
 assigned_deliveries = set()
-
 queue_worker_started = False
 
 
 # ---------- WORKER: PROCESSES THE QUEUE ----------
 def process_assignment_queue():
-    """
-    Background worker that processes queued jobs:
-    - Rider assignments
-    - Status updates (Picked Up, Delivered)
-
-    Simulates the async pattern: publish to queue → worker processes → webhook callback
-    """
+    """Background worker that processes queued jobs."""
     print("🔄 Reflex queue worker thread started and is now running!")
     while True:
         try:
@@ -85,7 +73,6 @@ def process_assignment_queue():
                 job = assignment_queue.pop(0)
                 print(f"📊 Queue has {len(assignment_queue)} remaining. Processing job: {job['type']}")
 
-                # Simulate processing time (e.g., sending push notification to rider)
                 time.sleep(3)
 
                 completed_jobs.append({
@@ -96,7 +83,6 @@ def process_assignment_queue():
                     "timestamp": str(datetime.datetime.now())
                 })
 
-                # Trigger webhook callback (simulates rider app confirming)
                 print(f"✅ Job {job['job_id']} processed. Calling webhook...")
                 process_webhook_callback(job)
             else:
@@ -107,10 +93,7 @@ def process_assignment_queue():
 
 
 def process_webhook_callback(job):
-    """
-    Simulates the rider's mobile app calling our webhook with confirmation.
-    Directly updates the delivery record (bypasses HTTP for Render compatibility).
-    """
+    """Simulates the rider's mobile app calling our webhook with confirmation."""
     print(f"📡 Webhook callback for job {job['job_id']} ({job['type']})...")
     time.sleep(2)
 
@@ -126,7 +109,6 @@ def process_webhook_callback(job):
             now = str(datetime.datetime.now())
 
             if job_type == "assign_rider":
-                # Mark as assigned
                 delivery["status"] = "Assigned"
                 delivery["assigned_rider"] = job["rider_id"]
                 delivery["assigned_rider_name"] = riders[job["rider_id"]]["name"]
@@ -149,7 +131,6 @@ def process_webhook_callback(job):
                     )
                 print(f"✅ {delivery_id} marked as Delivered")
 
-            # Clear duplicate guard on completion
             assigned_deliveries.discard(delivery_id)
 
         except Exception as e:
@@ -160,28 +141,23 @@ def process_webhook_callback(job):
 
 @app.route('/')
 def index():
-    """Serve the Reflex UI (three tabs: Retailer, Dispatcher, Rider)"""
+    """Serve the Reflex UI"""
     return render_template_string(HTML_TEMPLATE)
 
 
 @app.route('/api/deliveries', methods=['GET'])
 def get_deliveries():
-    """Return all deliveries"""
     return jsonify(deliveries)
 
 
 @app.route('/api/riders', methods=['GET'])
 def get_riders():
-    """Return all riders"""
     return jsonify(riders)
 
 
 @app.route('/api/deliveries', methods=['POST'])
 def create_delivery():
-    """
-    RETAILER: Log a new delivery request.
-    Required: customer_name, customer_phone, delivery_address, item_description
-    """
+    """RETAILER: Log a new delivery request."""
     data = request.get_json(silent=True) or {}
 
     customer_name = str(data.get('customer_name', '')).strip()
@@ -189,14 +165,12 @@ def create_delivery():
     delivery_address = str(data.get('delivery_address', '')).strip()
     item_description = str(data.get('item_description', '')).strip()
 
-    # Validation
     if not all([customer_name, customer_phone, delivery_address, item_description]):
         return jsonify({
             "error": "Missing required fields",
             "required": ["customer_name", "customer_phone", "delivery_address", "item_description"]
         }), 400
 
-    # Generate unique ID
     delivery_id = f"DEL-{uuid.uuid4().hex[:6].upper()}"
 
     deliveries[delivery_id] = {
@@ -228,10 +202,7 @@ def create_delivery():
 
 @app.route('/api/assign', methods=['POST'])
 def assign_rider():
-    """
-    DISPATCHER: Assign a delivery to a rider.
-    Publishes to queue → worker processes → webhook confirms.
-    """
+    """DISPATCHER: Assign a delivery to a rider."""
     data = request.get_json(silent=True) or {}
     delivery_id = str(data.get('delivery_id', '')).strip()
     rider_id = str(data.get('rider_id', '')).strip()
@@ -247,7 +218,6 @@ def assign_rider():
 
     delivery = deliveries[delivery_id]
 
-    # DUPLICATE PROTECTION: Cannot assign an already-assigned delivery
     if delivery_id in assigned_deliveries:
         return jsonify({
             "error": "Already assigned",
@@ -262,10 +232,8 @@ def assign_rider():
             "status": "invalid_state"
         }), 409
 
-    # Mark as assigned (duplicate guard)
     assigned_deliveries.add(delivery_id)
 
-    # PUBLISH TO QUEUE
     job_id = f"JOB-{uuid.uuid4().hex[:8].upper()}"
     assignment_queue.append({
         "job_id": job_id,
@@ -287,10 +255,7 @@ def assign_rider():
 
 @app.route('/api/rider/update', methods=['POST'])
 def rider_update_status():
-    """
-    RIDER: Update delivery status (Picked Up / Delivered).
-    Publishes to queue → worker processes → webhook confirms.
-    """
+    """RIDER: Update delivery status (Picked Up / Delivered)."""
     data = request.get_json(silent=True) or {}
     delivery_id = str(data.get('delivery_id', '')).strip()
     new_status = str(data.get('new_status', '')).strip()
@@ -304,11 +269,9 @@ def rider_update_status():
 
     delivery = deliveries[delivery_id]
 
-    # Verify the rider owns this delivery
     if rider_id and delivery["assigned_rider"] != rider_id:
         return jsonify({"error": "This delivery is not assigned to you"}), 403
 
-    # Validate status transitions
     valid_transitions = {
         "Picked Up": "Assigned",
         "Delivered": "Picked Up"
@@ -324,7 +287,6 @@ def rider_update_status():
             "message": f"Cannot transition from '{delivery['status']}' to '{new_status}'. Must be '{required_current}' first."
         }), 409
 
-    # Publish to queue
     job_type = "mark_picked_up" if new_status == "Picked Up" else "mark_delivered"
     job_id = f"JOB-{uuid.uuid4().hex[:8].upper()}"
 
@@ -351,10 +313,7 @@ def rider_update_status():
 
 @app.route('/api/scan/<delivery_id>', methods=['GET'])
 def scan_qr(delivery_id):
-    """
-    SCAN: Look up a delivery by QR code / ID.
-    Used by retailers to check proof of delivery and current status.
-    """
+    """SCAN: Look up a delivery by QR code / ID."""
     if delivery_id not in deliveries:
         return jsonify({"error": "Delivery not found"}), 404
 
@@ -377,10 +336,7 @@ def scan_qr(delivery_id):
 
 @app.route('/webhook/rider-confirm', methods=['POST'])
 def rider_confirm_webhook():
-    """
-    WEBHOOK: Rider app calls back to confirm a status change.
-    This is the async pattern in action.
-    """
+    """WEBHOOK: Rider app calls back to confirm a status change."""
     data = request.get_json(silent=True) or {}
     print(f"📩 Webhook received: {data}")
 
@@ -403,7 +359,6 @@ def rider_confirm_webhook():
 
 @app.route('/api/queue', methods=['GET'])
 def get_queue_status():
-    """Monitor the queue"""
     return jsonify({
         "queue_length": len(assignment_queue),
         "pending_jobs": assignment_queue,
@@ -413,7 +368,6 @@ def get_queue_status():
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    """Dashboard stats"""
     status_counts = {"Requested": 0, "Assigned": 0, "Picked Up": 0, "Delivered": 0}
     for d in deliveries.values():
         status_counts[d["status"]] = status_counts.get(d["status"], 0) + 1
@@ -436,7 +390,6 @@ def event_stream():
             try:
                 time.sleep(1)
 
-                # Build a lightweight snapshot for change detection
                 snapshot = json.dumps({
                     "deliveries": {d_id: d["status"] for d_id, d in deliveries.items()},
                     "queue_len": len(assignment_queue)
@@ -850,6 +803,9 @@ HTML_TEMPLATE = """
 <script>
     let currentTab = 'retailer';
 
+    // ---------- GLOBAL FLAG TO PAUSE POLLING DURING USER INTERACTION ----------
+    let pollingPaused = false;
+
     function switchTab(tabName, btn) {
         currentTab = tabName;
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -963,9 +919,7 @@ HTML_TEMPLATE = """
                 alert(data.error || data.message);
                 return;
             }
-            // Refresh immediately (shows the queued state)
             loadAll();
-            // Force refresh after the worker completes (5-8 seconds)
             setTimeout(loadAll, 3000);
             setTimeout(loadAll, 5000);
             setTimeout(loadAll, 8000);
@@ -987,9 +941,7 @@ HTML_TEMPLATE = """
                 alert(data.error || data.message);
                 return;
             }
-            // Refresh immediately (shows the queued state)
             loadAll();
-            // Force refresh after the worker completes (5-8 seconds)
             setTimeout(loadAll, 3000);
             setTimeout(loadAll, 5000);
             setTimeout(loadAll, 8000);
@@ -1053,8 +1005,16 @@ HTML_TEMPLATE = """
         `).join('');
     }
 
+    // ---------- DISPATCHER: PRESERVES DROPDOWN SELECTION ----------
     function renderDispatcherDeliveries(deliveries, riders) {
         const container = document.getElementById('dispatcherDeliveries');
+
+        // ---- SAVE CURRENT DROPDOWN SELECTIONS ----
+        const savedSelections = {};
+        document.querySelectorAll('[id^="rider-DEL-"]').forEach(el => {
+            if (el.value) savedSelections[el.id] = el.value;
+        });
+
         const list = Object.values(deliveries).sort((a, b) => b.created_at.localeCompare(a.created_at));
 
         if (!list.length) {
@@ -1093,6 +1053,12 @@ HTML_TEMPLATE = """
                 </div>
             `;
         }).join('');
+
+        // ---- RESTORE DROPDOWN SELECTIONS ----
+        Object.entries(savedSelections).forEach(([id, value]) => {
+            const el = document.getElementById(id);
+            if (el) el.value = value;
+        });
     }
 
     function renderRiders(riders) {
@@ -1175,10 +1141,19 @@ HTML_TEMPLATE = """
         `).join('');
     }
 
+    // ---------- PAUSE POLLING WHILE USER INTERACTS WITH A DROPDOWN ----------
+    document.addEventListener('focusin', (e) => {
+        if (e.target.tagName === 'SELECT') pollingPaused = true;
+    });
+    document.addEventListener('focusout', (e) => {
+        if (e.target.tagName === 'SELECT') {
+            setTimeout(() => { pollingPaused = false; }, 800);
+        }
+    });
+
     // ---------- INITIAL LOAD + SSE + POLLING FALLBACK ----------
     loadAll();
 
-    // Primary: SSE for instant updates
     if (typeof(EventSource) !== 'undefined') {
         const es = new EventSource('/api/stream');
         es.onmessage = function(event) {
@@ -1191,8 +1166,10 @@ HTML_TEMPLATE = """
         es.onerror = function() { console.log('🔄 SSE reconnecting...'); };
     }
 
-    // Fallback: Always poll every 3 seconds to guarantee UI stays fresh
-    setInterval(loadAll, 3000);
+    // Poll only when the user is NOT interacting with a dropdown
+    setInterval(() => {
+        if (!pollingPaused) loadAll();
+    }, 3000);
 </script>
 
 </body>
