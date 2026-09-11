@@ -1,18 +1,32 @@
 DRY RUN #1
-Date: [Date]
-Time: [Duration]
+Date: September 10, 2026
+Time: 10:30 AM
 
-Slide 1 (Title): 0:30
-Slide 2 (Problem): 1:00
-Slide 3 (Solution): 1:00
-Slide 4 (Architecture): 1:30
-Slide 5 (Data Model): 0:45
-Slide 6 (Status Flow): 1:00
-Slide 7 (Personas): 1:00
-Slide 8 (Trade-offs): 1:00
-Slide 9 (Edge Cases): 1:15
-Slide 10 (Roadmap): 0:45
-TOTAL: 9:45
+Section 1 (Intro): 0:30
+Section 2 (Problem): 1:00
+Section 3 (Solution): 1:00
+Section 4 (Architecture): 1:00
+Section 5 (Live Demo): 1:00
+Section 6 (Trade-offs): 0:30
+Section 7 (Close): 0:15
+TOTAL: 5:15
 
-Unclear Slides: Slide 4 (Architecture), Slide 8 (Trade-offs)
-Transitions: Smooth between slides 3-4, rough between 7-8
+Unclear Sections: Architecture — need to explain the queue - worker - webhook flow more clearly
+Transitions: Smooth throughout
+
+---
+
+DRY RUN #2
+Date: September 10, 2026
+Time: 2:30 PM
+
+Section 1 (Intro): 0:25
+Section 2 (Problem): 0:55
+Section 3 (Solution): 0:50
+Section 4 (Architecture): 1:00
+Section 5 (Live Demo): 1:15
+Section 6 (Trade-offs): 0:25
+Section 7 (Close): 0:10
+TOTAL: 5:00
+
+Feedback from peer: Live demo is the strongest part. Trim the architecture explanation.
